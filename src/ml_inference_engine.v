@@ -34,8 +34,8 @@
 
 `default_nettype none
 
-/* verilator lint_off WIDTHEXPAND */
-/* verilator lint_off WIDTHTRUNC */
+
+
 module ml_inference_engine (
     input  wire        clk,
     input  wire        rst_n,
@@ -257,7 +257,7 @@ module ml_inference_engine (
                 acc1_comb[h1] = acc1_comb[h1] +
                     ($signed({1'b0, s0_feat[i1]}) *
                      $signed(rom_w1(i1[5:0]*4 + h1[5:0])));
-            acc1_comb[h1] = acc1_comb[h1] + $signed({rom_b1(h1[1:0]), 8'h00});
+            acc1_comb[h1] = acc1_comb[h1] + $signed({rom_b1(h1[1:0]), 8'h00, 8'h00});
             if (acc1_comb[h1] <= 32'sd0)
                 s1_next[h1] = 8'd0;
             else if (acc1_comb[h1] >= 32'sd65535)
@@ -296,7 +296,7 @@ module ml_inference_engine (
                 acc2_comb[o2] = acc2_comb[o2] +
                     ($signed({1'b0, s1_hidden[h2]}) *
                      $signed(rom_w2(h2[4:0]*6 + o2[4:0])));
-            acc2_comb[o2] = acc2_comb[o2] + $signed({rom_b2(o2[2:0]), 8'h00});
+            acc2_comb[o2] = acc2_comb[o2] + $signed({rom_b2(o2[2:0]), 8'h00, 8'h00});
         end
     end
 
