@@ -34,6 +34,8 @@
 
 `default_nettype none
 
+/* verilator lint_off WIDTHEXPAND */
+/* verilator lint_off WIDTHTRUNC */
 module ml_inference_engine (
     input  wire        clk,
     input  wire        rst_n,
