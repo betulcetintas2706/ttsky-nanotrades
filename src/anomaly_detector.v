@@ -40,6 +40,7 @@ module anomaly_detector (
     input  wire [11:0] volume_data,
     input  wire        match_valid,
 
+
     /* verilator lint_off UNUSEDSIGNAL */
     input  wire [7:0]  match_price, /* verilator lint_on UNUSEDSIGNAL */
     // Live threshold inputs from config register (set via UI at demo time)
