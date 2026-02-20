@@ -33,6 +33,8 @@
 
 `default_nettype none
 
+/* verilator lint_off WIDTHEXPAND */
+/* verilator lint_off WIDTHTRUNC */
 module tt_um_nanotrade #(
     parameter CLK_HZ = 50_000_000
 ) (
@@ -79,7 +81,7 @@ module tt_um_nanotrade #(
     // ---------------------------------------------------------------
     wire [2:0]  ml_class;
     wire [7:0]  ml_confidence;
-    wire [7:0]  ml_margin;
+    /* verilator lint_off UNUSEDSIGNAL */ wire [7:0]  ml_margin; /* verilator lint_on UNUSEDSIGNAL */
     wire        ml_valid;
 
     // ---------------------------------------------------------------
@@ -113,7 +115,7 @@ module tt_um_nanotrade #(
     // Cascade Detector outputs (may override CB command)
     // ---------------------------------------------------------------
     wire        cascade_alert;
-    wire [1:0]  cascade_type;
+    /* verilator lint_off UNUSEDSIGNAL */ wire [1:0]  cascade_type; /* verilator lint_on UNUSEDSIGNAL */
     wire        cascade_cb_load;
     wire [7:0]  cascade_cb_param;
 
@@ -238,7 +240,7 @@ module tt_um_nanotrade #(
     // Alert Fusion
     // ---------------------------------------------------------------
     reg [2:0] ml_class_held;
-    reg [7:0] ml_conf_held;
+    /* verilator lint_off UNUSEDSIGNAL */ reg [7:0] ml_conf_held; /* verilator lint_on UNUSEDSIGNAL */
     reg       ml_anomaly_held;
     reg [2:0] ml_prio_held;
 
