@@ -268,9 +268,9 @@ module feature_extractor (
 
     // Clip 12-bit to 8-bit
     function automatic [7:0] clip8;
-        input [11:0] x;
+        input [15:0] x;
         begin
-            clip8 = (x > 12'd255) ? 8'd255 : x[7:0];
+            clip8 = (x > 16'd255) ? 8'd255 : x[7:0];
         end
     endfunction
 
