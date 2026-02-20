@@ -28,6 +28,8 @@
 
 `default_nettype none
 
+/* verilator lint_off WIDTHEXPAND */
+/* verilator lint_off WIDTHTRUNC */
 module feature_extractor (
     input  wire        clk,
     input  wire        rst_n,
@@ -37,7 +39,9 @@ module feature_extractor (
     input  wire [11:0] price_data,    // 12-bit price
     input  wire [11:0] volume_data,   // 12-bit volume
     input  wire        match_valid,   // order matched this cycle
+    /* verilator lint_off UNUSEDSIGNAL */
     input  wire [7:0]  match_price,   // matched price
+    /* verilator lint_on UNUSEDSIGNAL */
 
     // Output feature vector
     output reg  [127:0] features,      // 16 × 8-bit
@@ -254,7 +258,7 @@ module feature_extractor (
     // ---------------------------------------------------------------
 
     // Absolute delta between two 12-bit prices, clipped to 8 bits
-    function [7:0] price_delta;
+    function automatic [7:0] price_delta;
         input [11:0] a, b;
         reg [11:0] d;
         begin
@@ -264,7 +268,7 @@ module feature_extractor (
     endfunction
 
     // Clip 12-bit to 8-bit
-    function [7:0] clip8;
+    function automatic [7:0] clip8;
         input [11:0] x;
         begin
             clip8 = (x > 12'd255) ? 8'd255 : x[7:0];
@@ -272,7 +276,7 @@ module feature_extractor (
     endfunction
 
     // Clip 16-bit to 8-bit
-    function [7:0] clip8_16;
+    function automatic [7:0] clip8_16;
         input [15:0] x;
         begin
             clip8_16 = (x > 16'd255) ? 8'd255 : x[7:0];
@@ -280,7 +284,7 @@ module feature_extractor (
     endfunction
 
     // Volume ratio: cur / (avg/64) = cur*64/avg, clipped to 255
-    function [7:0] vol_ratio_byte;
+    function automatic [7:0] vol_ratio_byte;
         input [11:0] cur, avg;
         reg [19:0] vr_tmp;
         begin
@@ -294,7 +298,7 @@ module feature_extractor (
     endfunction
 
     // Spread: 255 when one side empty, 0 when balanced
-    function [7:0] spread_byte;
+    function automatic [7:0] spread_byte;
         input [7:0] bids, asks;
         begin
             if (bids == 8'd0 || asks == 8'd0)
@@ -307,7 +311,7 @@ module feature_extractor (
     endfunction
 
     // Imbalance: buys/(buys+sells) * 255
-    function [7:0] imbalance_byte;
+    function automatic [7:0] imbalance_byte;
         input [7:0] buys, sells;
         reg [15:0] ib_total, ib_num;
         begin
@@ -323,7 +327,7 @@ module feature_extractor (
 
     // Momentum: encode 2nd derivative into 0..255
     // If accelerating up → > 128, down → < 128, flat → 128
-    function [7:0] momentum_byte;
+    function automatic [7:0] momentum_byte;
         input [11:0] p0, p1, p2;
         reg signed [12:0] mb_mom;
         begin
