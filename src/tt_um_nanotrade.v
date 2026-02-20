@@ -79,6 +79,7 @@ module tt_um_nanotrade #(
     // ---------------------------------------------------------------
     wire [2:0]  ml_class;
     wire [7:0]  ml_confidence;
+    wire [7:0]  ml_margin;
     wire        ml_valid;
 
     // ---------------------------------------------------------------
@@ -86,6 +87,7 @@ module tt_um_nanotrade #(
     // ---------------------------------------------------------------
     reg [1:0] cb_mode_next;
     reg [7:0] cb_param_next;
+    reg       cb_load_r;
 
     always @(*) begin
         case (ml_class)
@@ -99,23 +101,9 @@ module tt_um_nanotrade #(
         endcase
     end
 
-    // ---------------------------------------------------------------
-    // IMPORTANT FIX:
-    // Turn ML valid into a 1-cycle LOAD PULSE (rising edge detect).
-    // If ml_valid is held high for multiple cycles, a level-based cb_load
-    // will keep reloading countdown and prevent self-heal.
-    // ---------------------------------------------------------------
-    reg ml_valid_d;
-    reg cb_load_r;
-
     always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            ml_valid_d <= 1'b0;
-            cb_load_r  <= 1'b0;
-        end else begin
-            cb_load_r  <= (ml_valid && !ml_valid_d); // 1-cycle pulse on rising edge
-            ml_valid_d <= ml_valid;
-        end
+        if (!rst_n) cb_load_r <= 1'b0;
+        else        cb_load_r <= ml_valid;
     end
 
     reg [1:0] cb_mode_cmd;
@@ -131,11 +119,9 @@ module tt_um_nanotrade #(
 
     // Mux: cascade overrides normal ML→CB when cascade fires
     // Cascade always forces PAUSE (2'b11) with doubled param
-    //
-    // IMPORTANT:
-    // Only the cascade_cb_load pulse should override, not cascade_alert level.
-    wire        cb_load_final  = cascade_cb_load | cb_load_r;
-    wire [1:0]  cb_mode_final  = cascade_cb_load ? 2'b11           : cb_mode_cmd;
+    // Cascade overrides ML CB load: when cascade fires, suppress normal ML->CB
+    wire        cb_load_final  = cascade_cb_load | (cb_load_r & !cascade_alert);
+    wire [1:0]  cb_mode_final  = cascade_cb_load ? 2'b11       : cb_mode_cmd;
     wire [7:0]  cb_param_final = cascade_cb_load ? cascade_cb_param : cb_param_cmd;
 
     always @(posedge clk or negedge rst_n) begin
@@ -223,6 +209,7 @@ module tt_um_nanotrade #(
         .feature_valid (feature_valid),
         .ml_class      (ml_class),
         .ml_confidence (ml_confidence),
+        .ml_margin     (ml_margin),
         .ml_valid      (ml_valid)
     );
 
