@@ -81,7 +81,6 @@ module tt_um_nanotrade #(
     // ---------------------------------------------------------------
     wire [2:0]  ml_class;
     wire [7:0]  ml_confidence;
- wire [7:0]  ml_margin;
     wire        ml_valid;
 
     // ---------------------------------------------------------------
@@ -116,6 +115,7 @@ module tt_um_nanotrade #(
     // ---------------------------------------------------------------
     wire        cascade_alert;
  wire [1:0]  cascade_type;
+    wire _cascade_type_msb = cascade_type[1]; // reserved
     wire _cascade_type_unused = cascade_type[1];  // bit[1] reserved
     wire        cascade_cb_load;
     wire [7:0]  cascade_cb_param;
