@@ -93,8 +93,7 @@ module feature_extractor (
     integer i;
 
     // Hoisted from unnamed block (Verilog-2001 compatibility)
-    reg [11:0] local_avg;
-    reg [11:0] local_delta;
+
 
     // ---------------------------------------------------------------
     // Sequential updates
@@ -150,13 +149,12 @@ module feature_extractor (
                 price_l[ptr_l] <= price_data;
                 ptr_l          <= ptr_l + 6'd1;
 
-                // Update MAD
-                local_avg   = price_sum8[14:3];
-                local_delta = (price_data > local_avg) ?
-                              (price_data - local_avg) :
-                              (local_avg  - price_data);
+                // Update MAD (inlined to avoid blocking assignments in sequential block)
                 // EMA of MAD: new_mad = (7*mad + delta) / 8
-                price_mad <= (price_mad * 7 + local_delta) >> 3;
+                price_mad <= (price_mad * 7 +
+                              ((price_data > price_sum8[14:3]) ?
+                               (price_data - price_sum8[14:3]) :
+                               (price_sum8[14:3] - price_data))) >> 3;
             end
 
             // --- Volume update ---
