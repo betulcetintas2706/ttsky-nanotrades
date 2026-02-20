@@ -40,6 +40,7 @@ module feature_extractor (
     input  wire [11:0] volume_data,   // 12-bit volume
     input  wire        match_valid,   // order matched this cycle
 
+
     /* verilator lint_off UNUSEDSIGNAL */
     input  wire [7:0]  match_price, /* verilator lint_on UNUSEDSIGNAL */   // matched price
 
@@ -289,7 +290,7 @@ module feature_extractor (
             if (avg == 12'd0)
                 vol_ratio_byte = 8'd64;
             else begin
-                vr_tmp = ({8'd0, cur} * 20'd64) / avg;
+                vr_tmp = ({8'd0, cur} * 20'd64) / {8'd0, avg};
                 vol_ratio_byte = (vr_tmp > 20'd255) ? 8'd255 : vr_tmp[7:0];
             end
         end
