@@ -87,7 +87,6 @@ module cascade_detector #(
     // Combinational cascade detection based on hist after shift
     // (We compute using "next" values)
     // ------------------------------------------------------------
- wire [2:0] h0_next = event_any ? event_code : hist[0];
     wire [2:0] h1_next = event_any ? hist[0]    : hist[1];
     wire [2:0] h2_next = event_any ? hist[1]    : hist[2];
 
