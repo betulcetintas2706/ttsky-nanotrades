@@ -243,37 +243,39 @@ module ml_inference_engine (
     //   acc[h] = Σ_{i=0}^{15} feat[i] * W1[i*4+h]  +  b1[h]
     //   hidden[h] = ReLU(acc[h] >> 8) clipped to UINT8
     // ---------------------------------------------------------------
-    reg signed [31:0] acc1 [0:3];
+    reg signed [31:0] acc1_comb [0:3];
+    reg [7:0]         s1_next   [0:3];
     integer i1, h1;
+
+    // Combinational: compute accumulation and ReLU for stage 1
+    always @(*) begin : s1_mac_comb
+        integer ci1, ch1;
+        for (ch1 = 0; ch1 < 4; ch1 = ch1 + 1) begin
+            acc1_comb[ch1] = 32'sd0;
+            for (ci1 = 0; ci1 < 16; ci1 = ci1 + 1)
+                acc1_comb[ch1] = acc1_comb[ch1] +
+                    ($signed({1'b0, s0_feat[ci1]}) *
+                     $signed(rom_w1(ci1[5:0]*4 + ch1[5:0])));
+            acc1_comb[ch1] = acc1_comb[ch1] + $signed({rom_b1(ch1[1:0]), 8'h00});
+            if (acc1_comb[ch1] <= 32'sd0)
+                s1_next[ch1] = 8'd0;
+            else if (acc1_comb[ch1] >= 32'sd65535)
+                s1_next[ch1] = 8'd255;
+            else
+                s1_next[ch1] = acc1_comb[ch1][15:8];
+        end
+    end
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s1_valid <= 1'b0;
-            for (k = 0; k < 4; k = k + 1) begin
+            for (k = 0; k < 4; k = k + 1)
                 s1_hidden[k] <= 8'd0;
-                acc1[k]      <= 32'sd0;
-            end
         end else begin
             s1_valid <= s0_valid;
             if (s0_valid) begin
-                for (h1 = 0; h1 < 4; h1 = h1 + 1) begin
-                    acc1[h1] = 32'sd0;
-                    for (i1 = 0; i1 < 16; i1 = i1 + 1) begin
-                        acc1[h1] = acc1[h1] +
-                            ($signed({1'b0, s0_feat[i1]}) *
-                             $signed(rom_w1(i1[5:0]*4 + h1[5:0])));
-                    end
-                    // Bias: scale to match accumulator (<<8)
-                    acc1[h1] = acc1[h1] + $signed({rom_b1(h1[1:0]), 8'h00});
-
-                    // ReLU + right-shift 8 → UINT8
-                    if (acc1[h1] <= 32'sd0)
-                        s1_hidden[h1] = 8'd0;
-                    else if (acc1[h1] >= 32'sd65535)
-                        s1_hidden[h1] = 8'd255;
-                    else
-                        s1_hidden[h1] = acc1[h1][15:8];
-                end
+                for (h1 = 0; h1 < 4; h1 = h1 + 1)
+                    s1_hidden[h1] <= s1_next[h1];
             end
         end
     end
@@ -283,7 +285,20 @@ module ml_inference_engine (
     //   logit[o] = Σ_{h=0}^{3} hidden[h] * W2[h*6+o]  +  b2[o]
     // ---------------------------------------------------------------
     integer h2, o2;
-    reg signed [31:0] acc2_tmp;
+    // Combinational: compute layer-2 accumulation
+    reg signed [31:0] acc2_comb [0:5];
+
+    always @(*) begin : s2_mac_comb
+        integer ch2, co2;
+        for (co2 = 0; co2 < 6; co2 = co2 + 1) begin
+            acc2_comb[co2] = 32'sd0;
+            for (ch2 = 0; ch2 < 4; ch2 = ch2 + 1)
+                acc2_comb[co2] = acc2_comb[co2] +
+                    ($signed({1'b0, s1_hidden[ch2]}) *
+                     $signed(rom_w2(ch2[4:0]*6 + co2[4:0])));
+            acc2_comb[co2] = acc2_comb[co2] + $signed({rom_b2(co2[2:0]), 8'h00});
+        end
+    end
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -293,15 +308,8 @@ module ml_inference_engine (
         end else begin
             s2_valid <= s1_valid;
             if (s1_valid) begin
-                for (o2 = 0; o2 < 6; o2 = o2 + 1) begin
-                    acc2_tmp = 32'sd0;
-                    for (h2 = 0; h2 < 4; h2 = h2 + 1) begin
-                        acc2_tmp = acc2_tmp +
-                            ($signed({1'b0, s1_hidden[h2]}) *
-                             $signed(rom_w2(h2[4:0]*6 + o2[4:0])));
-                    end
-                    s2_logit[o2] <= acc2_tmp + $signed({rom_b2(o2[2:0]), 8'h00});
-                end
+                for (o2 = 0; o2 < 6; o2 = o2 + 1)
+                    s2_logit[o2] <= acc2_comb[o2];
             end
         end
     end
@@ -309,12 +317,54 @@ module ml_inference_engine (
     // ---------------------------------------------------------------
     // Stage 3: Argmax  →  class (3-bit) + confidence (8-bit)
     // ---------------------------------------------------------------
-    reg signed [31:0] max_logit;
-    reg signed [31:0] second_max_logit;
-    reg signed [31:0] min_logit;
-    reg [2:0]         best_class;
-    reg signed [31:0] gap;
+    // Combinational argmax outputs
+    reg [2:0]  s3_class;
+    reg [7:0]  s3_confidence;
+    reg [7:0]  s3_margin;
     integer j3;
+
+    always @(*) begin : s3_argmax_comb
+        reg signed [31:0] mx_logit;
+        reg signed [31:0] sec_logit;
+        reg signed [31:0] mn_logit;
+        reg [2:0]         bc;
+        reg signed [31:0] g;
+        integer cj3;
+        mx_logit  = s2_logit[0];
+        sec_logit = -32'sd2147483648;
+        mn_logit  = s2_logit[0];
+        bc        = 3'd0;
+        for (cj3 = 1; cj3 < 6; cj3 = cj3 + 1) begin
+            if (s2_logit[cj3] > mx_logit) begin
+                sec_logit = mx_logit;
+                mx_logit  = s2_logit[cj3];
+                bc        = cj3[2:0];
+            end else if (s2_logit[cj3] > sec_logit) begin
+                sec_logit = s2_logit[cj3];
+            end
+            if (s2_logit[cj3] < mn_logit)
+                mn_logit = s2_logit[cj3];
+        end
+        if (sec_logit == -32'sd2147483648)
+            sec_logit = mn_logit;
+        s3_class = bc;
+        // Confidence: max - min scaled to 0..255
+        g = mx_logit - mn_logit;
+        if (g >= 32'sd65280)
+            s3_confidence = 8'd255;
+        else if (g <= 32'sd0)
+            s3_confidence = 8'd0;
+        else
+            s3_confidence = g[15:8];
+        // Margin: max - second_max scaled to 0..255
+        g = mx_logit - sec_logit;
+        if (g >= 32'sd65280)
+            s3_margin = 8'd255;
+        else if (g <= 32'sd0)
+            s3_margin = 8'd0;
+        else
+            s3_margin = g[15:8];
+    end
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -325,46 +375,9 @@ module ml_inference_engine (
         end else begin
             ml_valid <= s2_valid;
             if (s2_valid) begin
-                max_logit        = s2_logit[0];
-                second_max_logit = -32'sd2147483648; // INT32 min
-                min_logit        = s2_logit[0];
-                best_class       = 3'd0;
-
-                for (j3 = 1; j3 < 6; j3 = j3 + 1) begin
-                    if (s2_logit[j3] > max_logit) begin
-                        second_max_logit = max_logit;
-                        max_logit        = s2_logit[j3];
-                        best_class       = j3[2:0];
-                    end else if (s2_logit[j3] > second_max_logit) begin
-                        second_max_logit = s2_logit[j3];
-                    end
-
-                    if (s2_logit[j3] < min_logit)
-                        min_logit = s2_logit[j3];
-                end
-
-                if (second_max_logit == -32'sd2147483648)
-                    second_max_logit = min_logit;
-
-                ml_class <= best_class;
-
-                // Confidence: logit gap scaled to 0..255
-                gap = max_logit - min_logit;
-                if (gap >= 32'sd65280)
-                    ml_confidence <= 8'd255;
-                else if (gap <= 32'sd0)
-                    ml_confidence <= 8'd0;
-                else
-                    ml_confidence <= gap[15:8];
-
-                // Margin: max - second_max scaled to 0..255
-                gap = max_logit - second_max_logit;
-                if (gap >= 32'sd65280)
-                    ml_margin <= 8'd255;
-                else if (gap <= 32'sd0)
-                    ml_margin <= 8'd0;
-                else
-                    ml_margin <= gap[15:8];
+                ml_class      <= s3_class;
+                ml_confidence <= s3_confidence;
+                ml_margin     <= s3_margin;
             end
         end
     end
