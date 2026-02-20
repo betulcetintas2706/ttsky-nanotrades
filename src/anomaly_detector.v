@@ -30,6 +30,8 @@
 
 `default_nettype none
 
+/* verilator lint_off WIDTHEXPAND */
+/* verilator lint_off WIDTHTRUNC */
 module anomaly_detector (
     input  wire        clk,
     input  wire        rst_n,
@@ -37,7 +39,8 @@ module anomaly_detector (
     input  wire [11:0] price_data,
     input  wire [11:0] volume_data,
     input  wire        match_valid,
-    input  wire [7:0]  match_price,
+    /* verilator lint_off UNUSEDSIGNAL */
+    input  wire [7:0]  match_price, /* verilator lint_on UNUSEDSIGNAL */
     // Live threshold inputs from config register (set via UI at demo time)
     input  wire [11:0] spike_thresh,   // default 12'd20
     input  wire [11:0] flash_thresh,   // default 12'd40
