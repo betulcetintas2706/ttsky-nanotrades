@@ -64,7 +64,7 @@ module order_book (
     // ----------------------------------------------------------------
     reg [6:0] best_bid; reg best_bid_valid; reg [1:0] best_bid_idx;
     reg [6:0] best_ask; reg best_ask_valid; reg [1:0] best_ask_idx;
-    integer i;
+    integer i, i2, i3;
 
     always @(*) begin
         best_bid=7'h00; best_bid_valid=1'b0; best_bid_idx=2'd0;
@@ -88,9 +88,9 @@ module order_book (
     always @(*) begin
         empty_bid_slot=2'd0; has_empty_bid=1'b0;
         empty_ask_slot=2'd0; has_empty_ask=1'b0;
-        for(i=3;i>=0;i=i-1) begin
-            if(!bid[i][7]) begin empty_bid_slot=i[1:0]; has_empty_bid=1'b1; end
-            if(!ask[i][7]) begin empty_ask_slot=i[1:0]; has_empty_ask=1'b1; end
+        for(i2=3;i2>=0;i2=i2-1) begin
+            if(!bid[i2][7]) begin empty_bid_slot=i2[1:0]; has_empty_bid=1'b1; end
+            if(!ask[i2][7]) begin empty_ask_slot=i2[1:0]; has_empty_ask=1'b1; end
         end
     end
 
@@ -172,7 +172,7 @@ module order_book (
         if (!rst_n) begin
             match_valid <= 1'b0;
             match_price <= 8'd0;
-            for(i=0;i<4;i=i+1) begin bid[i]<=8'h00; ask[i]<=8'h00; end
+            for(i3=0;i3<4;i3=i3+1) begin bid[i3]<=8'h00; ask[i3]<=8'h00; end
         end else begin
             match_valid <= 1'b0;
 
