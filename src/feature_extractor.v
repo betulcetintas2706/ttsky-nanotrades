@@ -198,16 +198,13 @@ module feature_extractor (
                 feature_valid <= 1'b1;
 
                 // [0] price_change_1s: |cur - oldest_short|
-                features[0*8 +: 8] <= clip8(
-                    price_delta(cur_price, price_s[ptr_s]) );
+                features[0*8 +: 8] <= clip8({8'd0, price_delta(cur_price, price_s[ptr_s])});
 
                 // [1] price_change_10s: |cur - oldest_medium|
-                features[1*8 +: 8] <= clip8(
-                    price_delta(cur_price, price_m[ptr_m]) );
+                features[1*8 +: 8] <= clip8({8'd0, price_delta(cur_price, price_m[ptr_m])});
 
                 // [2] price_change_60s: |cur - oldest_long|
-                features[2*8 +: 8] <= clip8(
-                    price_delta(cur_price, price_l[ptr_l]) );
+                features[2*8 +: 8] <= clip8({8'd0, price_delta(cur_price, price_l[ptr_l])});
 
                 // [3] volume_ratio: cur_vol / (vol_avg/64) — scales 1x→64
                 features[3*8 +: 8] <= vol_ratio_byte(cur_vol, vol_avg);
@@ -219,7 +216,7 @@ module feature_extractor (
                 features[5*8 +: 8] <= imbalance_byte(buy_count, sell_count);
 
                 // [6] volatility: MAD * 4 clipped
-                features[6*8 +: 8] <= clip8({price_mad, 2'b00});
+                features[6*8 +: 8] <= clip8({2'b00, price_mad, 2'b00});
 
                 // [7] order_arrival_rate: (buy+sell) count, clipped
                 features[7*8 +: 8] <= clip8_16(
@@ -229,10 +226,10 @@ module feature_extractor (
                 features[8*8 +: 8] <= 8'd0;
 
                 // [9] buy_depth: buy_count * 16
-                features[9*8 +: 8]  <= clip8({buy_count[3:0], 4'h0});
+                features[9*8 +: 8]  <= clip8({8'd0, buy_count[3:0], 4'h0});
 
                 // [10] sell_depth: sell_count * 16
-                features[10*8 +: 8] <= clip8({sell_count[3:0], 4'h0});
+                features[10*8 +: 8] <= clip8({8'd0, sell_count[3:0], 4'h0});
 
                 // [11] time_since_trade: timer >> 4
                 features[11*8 +: 8] <= trade_timer[11:4];
@@ -241,7 +238,7 @@ module feature_extractor (
                 features[12*8 +: 8] <= 8'd200;   // healthy default
 
                 // [13] trade_frequency: match_rate * 4
-                features[13*8 +: 8] <= clip8({match_rate, 2'b00});
+                features[13*8 +: 8] <= clip8({6'd0, match_rate, 2'b00});
 
                 // [14] price_momentum: 2nd derivative direction + magnitude
                 features[14*8 +: 8] <= momentum_byte(cur_price, price_prev1, price_prev2);
