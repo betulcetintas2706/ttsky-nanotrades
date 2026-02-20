@@ -19,8 +19,8 @@
 
 `default_nettype none
 
-/* verilator lint_off WIDTHEXPAND */
-/* verilator lint_off WIDTHTRUNC */
+
+
 module cascade_detector #(
     parameter integer CASCADE_WINDOW = 64,
     parameter integer CASCADE_HOLD   = 32
@@ -87,7 +87,7 @@ module cascade_detector #(
     // Combinational cascade detection based on hist after shift
     // (We compute using "next" values)
     // ------------------------------------------------------------
-    /* verilator lint_off UNUSEDSIGNAL */ wire [2:0] h0_next = event_any ? event_code : hist[0]; /* verilator lint_on UNUSEDSIGNAL */
+ wire [2:0] h0_next = event_any ? event_code : hist[0];
     wire [2:0] h1_next = event_any ? hist[0]    : hist[1];
     wire [2:0] h2_next = event_any ? hist[1]    : hist[2];
 
