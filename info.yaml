@@ -1,56 +1,53 @@
-# Tiny Tapeout project information
 project:
-  title:        ""      # Project title
-  author:       ""      # Your name
-  discord:      ""      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
-  description:  ""      # One line description of what your project does
-  language:     "Verilog" # other examples include SystemVerilog, Amaranth, VHDL, etc
-  clock_hz:     0       # Clock frequency in Hz (or 0 if not applicable)
+  title:       "NanoTrade: HFT Matching Engine + ML Anomaly Detection"
+  author:      "IEEE UofT ASIC Team"
+  discord:     ""
+  description: "Real-time ASIC combining order book matching with triple-path anomaly
+                detection: rule-based (1-cycle latency), pipelined 16->8->6 MLP neural
+                network (4-cycle latency), and a market cascade detector that recognises
+                multi-event sequences (volume surge -> flash crash, spoofing -> crash,
+                2010 Flash Crash triple pattern) and doubles the circuit breaker freeze
+                duration. ML-driven adaptive circuit breaker responds in 2 cycles (40 ns)
+                to halt, throttle, or widen spread on the order book. Demonstrates
+                parallelism and determinism impossible in software."
+  language:    "Verilog"
+  clock_hz:    50000000
 
-  # How many tiles your design occupies? A single tile is about 167x108 uM.
-  tiles: "1x1"          # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 6x2 or 8x2
+tiles: "2x2"
+top_module: "tt_um_nanotrade"
 
-  # Your top module name must start with "tt_um_". Make it unique by including your github username:
-  top_module:  "tt_um_example"
+source_files:
+  - "tt_um_nanotrade.v"
+  - "order_book.v"
+  - "anomaly_detector.v"
+  - "feature_extractor.v"
+  - "ml_inference_engine.v"
+  - "cascade_detector.v"
 
-  # List your project's source files here.
-  # Source files must be in ./src and you must list each source file separately, one per line.
-  # Don't forget to also update `PROJECT_SOURCES` in test/Makefile.
-  source_files:
-    - "project.v"
-
-# The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.
-# This section is for the datasheet/website. Use descriptive names (e.g., RX, TX, MOSI, SCL, SEG_A, etc.).
 pinout:
-  # Inputs
-  ui[0]: ""
-  ui[1]: ""
-  ui[2]: ""
-  ui[3]: ""
-  ui[4]: ""
-  ui[5]: ""
-  ui[6]: ""
-  ui[7]: ""
+  ui[0]: "Data bit 0 (low payload)"
+  ui[1]: "Data bit 1"
+  ui[2]: "Data bit 2"
+  ui[3]: "Data bit 3"
+  ui[4]: "Data bit 4"
+  ui[5]: "Data bit 5 (MSB of 6-bit payload)"
+  ui[6]: "Input type bit 0 (00=price,01=vol,10=buy,11=sell)"
+  ui[7]: "Input type bit 1"
 
-  # Outputs
-  uo[0]: ""
-  uo[1]: ""
-  uo[2]: ""
-  uo[3]: ""
-  uo[4]: ""
-  uo[5]: ""
-  uo[6]: ""
-  uo[7]: ""
+  uo[0]: "Alert type bit 0"
+  uo[1]: "Alert type bit 1"
+  uo[2]: "Alert type bit 2 (0=none..7=flash crash / cascade)"
+  uo[3]: "Order match valid / CB active / UART TX / heartbeat"
+  uo[4]: "Alert priority bit 0"
+  uo[5]: "Alert priority bit 1"
+  uo[6]: "Alert priority bit 2 (7=critical)"
+  uo[7]: "Global alert flag (rule OR ML OR cascade)"
 
-  # Bidirectional pins
-  uio[0]: ""
-  uio[1]: ""
-  uio[2]: ""
-  uio[3]: ""
-  uio[4]: ""
-  uio[5]: ""
-  uio[6]: ""
-  uio[7]: ""
-
-# Do not change!
-yaml_version: 6
+  uio[0]: "CASCADE type bit 0 / match price bit 0"
+  uio[1]: "CASCADE alert flag / match price bit 1"
+  uio[2]: "CB state bit 0 / match price bit 2"
+  uio[3]: "CB state bit 1 / match price bit 3"
+  uio[4]: "ML class bit 0 / match price bit 4"
+  uio[5]: "ML class bit 1 / match price bit 5"
+  uio[6]: "ML class bit 2 / match price bit 6"
+  uio[7]: "ML inference valid pulse / match price bit 7"
