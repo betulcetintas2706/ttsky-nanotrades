@@ -6,8 +6,7 @@ SIM ?= icarus
 FST ?= -fst # Use more efficient FST format
 TOPLEVEL_LANG ?= verilog
 SRC_DIR = $(PWD)/../src
-PROJECT_SOURCES = project.v
-
+PROJECT_SOURCES = tt_um_nanotrade.v order_book.v anomaly_detector.v feature_extractor.v ml_inference_engine.v cascade_detector.v
 ifneq ($(GATES),yes)
 
 # RTL simulation:
