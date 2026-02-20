@@ -249,20 +249,19 @@ module ml_inference_engine (
 
     // Combinational: compute accumulation and ReLU for stage 1
     always @(*) begin : s1_mac_comb
-        integer ci1, ch1;
-        for (ch1 = 0; ch1 < 4; ch1 = ch1 + 1) begin
-            acc1_comb[ch1] = 32'sd0;
-            for (ci1 = 0; ci1 < 16; ci1 = ci1 + 1)
-                acc1_comb[ch1] = acc1_comb[ch1] +
-                    ($signed({1'b0, s0_feat[ci1]}) *
-                     $signed(rom_w1(ci1[5:0]*4 + ch1[5:0])));
-            acc1_comb[ch1] = acc1_comb[ch1] + $signed({rom_b1(ch1[1:0]), 8'h00});
-            if (acc1_comb[ch1] <= 32'sd0)
-                s1_next[ch1] = 8'd0;
-            else if (acc1_comb[ch1] >= 32'sd65535)
-                s1_next[ch1] = 8'd255;
+        for (h1 = 0; h1 < 4; h1 = h1 + 1) begin
+            acc1_comb[h1] = 32'sd0;
+            for (i1 = 0; i1 < 16; i1 = i1 + 1)
+                acc1_comb[h1] = acc1_comb[h1] +
+                    ($signed({1'b0, s0_feat[i1]}) *
+                     $signed(rom_w1(i1[5:0]*4 + h1[5:0])));
+            acc1_comb[h1] = acc1_comb[h1] + $signed({rom_b1(h1[1:0]), 8'h00});
+            if (acc1_comb[h1] <= 32'sd0)
+                s1_next[h1] = 8'd0;
+            else if (acc1_comb[h1] >= 32'sd65535)
+                s1_next[h1] = 8'd255;
             else
-                s1_next[ch1] = acc1_comb[ch1][15:8];
+                s1_next[h1] = acc1_comb[h1][15:8];
         end
     end
 
@@ -289,14 +288,13 @@ module ml_inference_engine (
     reg signed [31:0] acc2_comb [0:5];
 
     always @(*) begin : s2_mac_comb
-        integer ch2, co2;
-        for (co2 = 0; co2 < 6; co2 = co2 + 1) begin
-            acc2_comb[co2] = 32'sd0;
-            for (ch2 = 0; ch2 < 4; ch2 = ch2 + 1)
-                acc2_comb[co2] = acc2_comb[co2] +
-                    ($signed({1'b0, s1_hidden[ch2]}) *
-                     $signed(rom_w2(ch2[4:0]*6 + co2[4:0])));
-            acc2_comb[co2] = acc2_comb[co2] + $signed({rom_b2(co2[2:0]), 8'h00});
+        for (o2 = 0; o2 < 6; o2 = o2 + 1) begin
+            acc2_comb[o2] = 32'sd0;
+            for (h2 = 0; h2 < 4; h2 = h2 + 1)
+                acc2_comb[o2] = acc2_comb[o2] +
+                    ($signed({1'b0, s1_hidden[h2]}) *
+                     $signed(rom_w2(h2[4:0]*6 + o2[4:0])));
+            acc2_comb[o2] = acc2_comb[o2] + $signed({rom_b2(o2[2:0]), 8'h00});
         end
     end
 
@@ -329,21 +327,20 @@ module ml_inference_engine (
         reg signed [31:0] mn_logit;
         reg [2:0]         bc;
         reg signed [31:0] g;
-        integer cj3;
         mx_logit  = s2_logit[0];
         sec_logit = -32'sd2147483648;
         mn_logit  = s2_logit[0];
         bc        = 3'd0;
-        for (cj3 = 1; cj3 < 6; cj3 = cj3 + 1) begin
-            if (s2_logit[cj3] > mx_logit) begin
+        for (j3 = 1; j3 < 6; j3 = j3 + 1) begin
+            if (s2_logit[j3] > mx_logit) begin
                 sec_logit = mx_logit;
-                mx_logit  = s2_logit[cj3];
-                bc        = cj3[2:0];
-            end else if (s2_logit[cj3] > sec_logit) begin
-                sec_logit = s2_logit[cj3];
+                mx_logit  = s2_logit[j3];
+                bc        = j3[2:0];
+            end else if (s2_logit[j3] > sec_logit) begin
+                sec_logit = s2_logit[j3];
             end
-            if (s2_logit[cj3] < mn_logit)
-                mn_logit = s2_logit[cj3];
+            if (s2_logit[j3] < mn_logit)
+                mn_logit = s2_logit[j3];
         end
         if (sec_logit == -32'sd2147483648)
             sec_logit = mn_logit;
