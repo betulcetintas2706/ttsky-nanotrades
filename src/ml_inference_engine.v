@@ -268,11 +268,11 @@ module ml_inference_engine (
 
                     // ReLU + right-shift 8 → UINT8
                     if (acc1[h1] <= 32'sd0)
-                        s1_hidden[h1] <= 8'd0;
+                        s1_hidden[h1] = 8'd0;
                     else if (acc1[h1] >= 32'sd65535)
-                        s1_hidden[h1] <= 8'd255;
+                        s1_hidden[h1] = 8'd255;
                     else
-                        s1_hidden[h1] <= acc1[h1][15:8];
+                        s1_hidden[h1] = acc1[h1][15:8];
                 end
             end
         end
