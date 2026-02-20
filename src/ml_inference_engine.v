@@ -47,8 +47,7 @@ module ml_inference_engine (
     // Result (valid 4 cycles after feature_valid)
     output reg  [2:0]  ml_class,
     output reg  [7:0]  ml_confidence,
-    output reg         [7:0]  ml_margin,
-    output reg         ml_valid
+        output reg         ml_valid
 );
 
     // ---------------------------------------------------------------
@@ -225,17 +224,17 @@ module ml_inference_engine (
     // ---------------------------------------------------------------
     // Stage 0: Latch inputs
     // ---------------------------------------------------------------
-    integer k;
+    integer k0, k1, k2;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s0_valid <= 1'b0;
-            for (k = 0; k < 16; k = k + 1)
-                s0_feat[k] <= 8'd0;
+            for (k0 = 0; k0 < 16; k0 = k0 + 1)
+                s0_feat[k0] <= 8'd0;
         end else begin
             s0_valid <= feature_valid;
             if (feature_valid) begin
-                for (k = 0; k < 16; k = k + 1)
-                    s0_feat[k] <= feat[k];
+                for (k0 = 0; k0 < 16; k0 = k0 + 1)
+                    s0_feat[k0] <= feat[k0];
             end
         end
     end
@@ -270,8 +269,8 @@ module ml_inference_engine (
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s1_valid <= 1'b0;
-            for (k = 0; k < 4; k = k + 1)
-                s1_hidden[k] <= 8'd0;
+            for (k1 = 0; k1 < 4; k1 = k1 + 1)
+                s1_hidden[k1] <= 8'd0;
         end else begin
             s1_valid <= s0_valid;
             if (s0_valid) begin
@@ -303,8 +302,8 @@ module ml_inference_engine (
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s2_valid <= 1'b0;
-            for (k = 0; k < 6; k = k + 1)
-                s2_logit[k] <= 32'sd0;
+            for (k2 = 0; k2 < 6; k2 = k2 + 1)
+                s2_logit[k2] <= 32'sd0;
         end else begin
             s2_valid <= s1_valid;
             if (s1_valid) begin
@@ -320,7 +319,6 @@ module ml_inference_engine (
     // Combinational argmax outputs
     reg [2:0]  s3_class;
     reg [7:0]  s3_confidence;
-    reg [7:0]  s3_margin;
     integer j3;
 
     always @(*) begin : s3_argmax_comb
@@ -355,14 +353,6 @@ module ml_inference_engine (
             s3_confidence = 8'd0;
         else
             s3_confidence = g[15:8];
-        // Margin: max - second_max scaled to 0..255
-        g = mx_logit - sec_logit;
-        if (g >= 32'sd65280)
-            s3_margin = 8'd255;
-        else if (g <= 32'sd0)
-            s3_margin = 8'd0;
-        else
-            s3_margin = g[15:8];
     end
 
     always @(posedge clk or negedge rst_n) begin
@@ -370,13 +360,11 @@ module ml_inference_engine (
             ml_valid      <= 1'b0;
             ml_class      <= 3'd0;
             ml_confidence <= 8'd0;
-            ml_margin     <= 8'd0;
         end else begin
             ml_valid <= s2_valid;
             if (s2_valid) begin
                 ml_class      <= s3_class;
                 ml_confidence <= s3_confidence;
-                ml_margin     <= s3_margin;
             end
         end
     end
