@@ -57,29 +57,29 @@ module anomaly_detector (
     // ---------------------------------------------------------------
 
     // Price history: 8-entry ring buffer of 12-bit prices
-    reg [11:0] price_hist [0:7];
-    reg [2:0]  price_ptr;
+    reg [11:0] price_hist [0:3];
+    reg [1:0]  price_ptr;
 
     // Volume history: 8-entry ring buffer
-    reg [11:0] vol_hist [0:7];
-    reg [2:0]  vol_ptr;
+    reg [11:0] vol_hist [0:3];
+    reg [1:0]  vol_ptr;
 
     // Baseline price (average of last 8, updated slowly)
-    reg [14:0] price_sum;   // 12-bit * 8 needs 15 bits
+    reg [13:0] price_sum;   // 12-bit * 8 needs 15 bits
     reg [11:0] price_avg;
 
     // Baseline volume
-    reg [14:0] vol_sum;
+    reg [13:0] vol_sum;
     reg [11:0] vol_avg;
 
     // Trade velocity counter
-    reg [5:0]  match_counter;  // matches in current window
+    reg [4:0]  match_counter;  // matches in current window
     reg [7:0]  window_timer;   // window period counter
-    reg [5:0]  match_rate;     // captured at window end
+    reg [4:0]  match_rate;     // captured at window end
 
     // Bid/ask depth counters (from order book pressure)
-    reg [3:0]  buy_order_count;
-    reg [3:0]  sell_order_count;
+    reg [2:0]  buy_order_count;
+    reg [2:0]  sell_order_count;
 
     // Current values
     reg [11:0] current_price;
@@ -101,22 +101,22 @@ module anomaly_detector (
     // ---------------------------------------------------------------
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            price_ptr        <= 3'd0;
-            vol_ptr          <= 3'd0;
-            price_sum        <= 15'd0;
-            vol_sum          <= 15'd0;
+            price_ptr        <= 2'd0;
+            vol_ptr          <= 2'd0;
+            price_sum        <= 14'd0;
+            vol_sum          <= 14'd0;
             price_avg        <= 12'd100;  // sane default
             vol_avg          <= 12'd100;
-            match_counter    <= 6'd0;
+            match_counter    <= 5'd0;
             window_timer     <= 8'd0;
-            match_rate       <= 6'd0;
-            buy_order_count  <= 4'd0;
-            sell_order_count <= 4'd0;
+            match_rate       <= 5'd0;
+            buy_order_count  <= 3'd0;
+            sell_order_count <= 3'd0;
             current_price    <= 12'd100;
             prev_price       <= 12'd100;
             current_volume   <= 12'd0;
             price_mad        <= 12'd5;
-            for (i = 0; i < 8; i = i + 1) begin
+            for (i = 0; i < 4; i = i + 1) begin
                 price_hist[i] <= 12'd100;
                 vol_hist[i]   <= 12'd100;
             end
@@ -126,10 +126,10 @@ module anomaly_detector (
             if (is_price) begin
                 prev_price               <= current_price;
                 current_price            <= price_data;
-                price_sum                <= price_sum - {3'd0, price_hist[price_ptr]} + {3'd0, price_data};
+                price_sum                <= price_sum - {2'd0, price_hist[price_ptr]} + {2'd0, price_data};
                 price_hist[price_ptr]    <= price_data;
-                price_ptr                <= price_ptr + 3'd1;
-                price_avg                <= price_sum[14:3]; // divide by 8
+                price_ptr                <= price_ptr + 2'd1;
+                price_avg                <= price_sum[13:2]; // divide by 8
 
                 // Update MAD (simplified: |price - avg| rolling average)
                 if (price_data > price_avg)
@@ -141,26 +141,26 @@ module anomaly_detector (
             // Update volume history
             if (is_volume) begin
                 current_volume        <= volume_data;
-                vol_sum               <= vol_sum - {3'd0, vol_hist[vol_ptr]} + {3'd0, volume_data};
+                vol_sum               <= vol_sum - {2'd0, vol_hist[vol_ptr]} + {2'd0, volume_data};
                 vol_hist[vol_ptr]     <= volume_data;
-                vol_ptr               <= vol_ptr + 3'd1;
-                vol_avg               <= vol_sum[14:3]; // divide by 8
+                vol_ptr               <= vol_ptr + 2'd1;
+                vol_avg               <= vol_sum[13:2]; // divide by 8
             end
 
             // Update order pressure counters
             if (is_buy)
-                buy_order_count  <= (buy_order_count < 4'hF) ? buy_order_count + 4'd1 : 4'hF;
+                buy_order_count  <= (buy_order_count < 3'h7) ? buy_order_count + 3'd1 : 3'h7;
             if (is_sell)
-                sell_order_count <= (sell_order_count < 4'hF) ? sell_order_count + 4'd1 : 4'hF;
+                sell_order_count <= (sell_order_count < 3'h7) ? sell_order_count + 3'd1 : 3'h7;
 
             // Trade velocity window
             if (match_valid)
-                match_counter <= (match_counter < 6'h3F) ? match_counter + 6'd1 : 6'h3F;
+                match_counter <= (match_counter < 5'h1F) ? match_counter + 5'd1 : 5'h1F;
 
             window_timer <= window_timer + 8'd1;
             if (window_timer == 8'hFF) begin
                 match_rate    <= match_counter;
-                match_counter <= 6'd0;
+                match_counter <= 5'd0;
                 // Slowly decay order counts to avoid stale data
                 buy_order_count  <= buy_order_count >> 1;
                 sell_order_count <= sell_order_count >> 1;
@@ -175,7 +175,7 @@ module anomaly_detector (
     // Thresholds — driven by config register via top-level (tunable live at demo)
     // spike_thresh and flash_thresh are inputs; others remain fixed
     localparam VOL_SURGE_MULT  = 2;
-    localparam VELOCITY_THRESH = 6'd30;
+    localparam VELOCITY_THRESH = 5'd30;
     localparam VOL_DRY_DIV     = 4;
 
     // [0] Price Spike
@@ -205,11 +205,11 @@ module anomaly_detector (
 
     // [5] Spread Widening (using bid/ask order counts as proxy)
     //     Wide spread = few orders on one side
-    wire det_spread = (buy_order_count == 4'd0 && sell_order_count > 4'd2) ||
-                      (sell_order_count == 4'd0 && buy_order_count > 4'd2);
+    wire det_spread = (buy_order_count == 3'd0 && sell_order_count > 3'd2) ||
+                      (sell_order_count == 3'd0 && buy_order_count > 3'd2);
 
     // [6] Order Imbalance (3:1 ratio)
-    wire det_imbalance = (buy_order_count > 4'd0 && sell_order_count > 4'd0) &&
+    wire det_imbalance = (buy_order_count > 3'd0 && sell_order_count > 3'd0) &&
                          ((buy_order_count > (sell_order_count << 2)) ||
                           (sell_order_count > (buy_order_count << 2)));
 
