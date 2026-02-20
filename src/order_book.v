@@ -27,15 +27,16 @@
 
 `default_nettype none
 
-/* verilator lint_off WIDTHEXPAND */
-/* verilator lint_off WIDTHTRUNC */
+
+
 module order_book (
     input  wire       clk,
     input  wire       rst_n,
     input  wire [1:0] input_type,
+
     /* verilator lint_off UNUSEDSIGNAL */
-    input  wire [5:0] data_in, /* verilator lint_on UNUSEDSIGNAL */
-    /* verilator lint_off UNUSEDSIGNAL */
+    input  wire [5:0] data_in,
+
     input  wire [5:0] ext_data, /* verilator lint_on UNUSEDSIGNAL */
     // ── ML Circuit Breaker Interface ────────────────────────────────
     input  wire [1:0] cb_mode,       // 00=normal 01=throttle 10=widen 11=pause
@@ -54,7 +55,7 @@ module order_book (
     reg [7:0] bid [0:3];
     reg [7:0] ask [0:3];
 
-    wire [6:0] new_price = {ext_data[0], data_in[5:1]};
+    wire [6:0] new_price = {1'b0, ext_data[0], data_in[5:1]};
     wire       is_buy    = (input_type == 2'b10);
     wire       is_sell   = (input_type == 2'b11);
 
@@ -99,7 +100,8 @@ module order_book (
 
     reg [1:0]  cb_mode_r;
     reg [8:0]  cb_countdown;      // 9-bit: up to 510 cycles
-    /* verilator lint_off UNUSEDSIGNAL */ reg [7:0]  cb_param_r; /* verilator lint_on UNUSEDSIGNAL */
+ reg [7:0]  cb_param_r;
+    wire _cb_param_r_unused = |cb_param_r[3:0];  // prevent UNUSEDSIGNAL
     reg [3:0]  throttle_cnt;
 
     wire [3:0] throttle_div   = cb_param_r[7:4];
