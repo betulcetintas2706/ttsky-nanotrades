@@ -114,8 +114,7 @@ module tt_um_nanotrade #(
     // Cascade Detector outputs (may override CB command)
     // ---------------------------------------------------------------
     wire        cascade_alert;
- wire [1:0]  cascade_type;
-    wire _cascade_type_msb = cascade_type[1]; // reserved
+ /* verilator lint_off UNUSEDSIGNAL */ wire [1:0]  cascade_type; /* verilator lint_on UNUSEDSIGNAL */
     wire _cascade_type_unused = cascade_type[1];  // bit[1] reserved
     wire        cascade_cb_load;
     wire [7:0]  cascade_cb_param;
@@ -240,7 +239,6 @@ module tt_um_nanotrade #(
     // Alert Fusion
     // ---------------------------------------------------------------
     reg [2:0] ml_class_held;
- reg [7:0] ml_conf_held;
     reg       ml_anomaly_held;
     reg [2:0] ml_prio_held;
 
