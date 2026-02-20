@@ -27,12 +27,16 @@
 
 `default_nettype none
 
+/* verilator lint_off WIDTHEXPAND */
+/* verilator lint_off WIDTHTRUNC */
 module order_book (
     input  wire       clk,
     input  wire       rst_n,
     input  wire [1:0] input_type,
-    input  wire [5:0] data_in,
-    input  wire [5:0] ext_data,
+    /* verilator lint_off UNUSEDSIGNAL */
+    input  wire [5:0] data_in, /* verilator lint_on UNUSEDSIGNAL */
+    /* verilator lint_off UNUSEDSIGNAL */
+    input  wire [5:0] ext_data, /* verilator lint_on UNUSEDSIGNAL */
     // ── ML Circuit Breaker Interface ────────────────────────────────
     input  wire [1:0] cb_mode,       // 00=normal 01=throttle 10=widen 11=pause
     input  wire [7:0] cb_param,      // confidence-derived parameter
@@ -95,7 +99,7 @@ module order_book (
 
     reg [1:0]  cb_mode_r;
     reg [8:0]  cb_countdown;      // 9-bit: up to 510 cycles
-    reg [7:0]  cb_param_r;
+    /* verilator lint_off UNUSEDSIGNAL */ reg [7:0]  cb_param_r; /* verilator lint_on UNUSEDSIGNAL */
     reg [3:0]  throttle_cnt;
 
     wire [3:0] throttle_div   = cb_param_r[7:4];
