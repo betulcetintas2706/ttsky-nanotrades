@@ -28,8 +28,8 @@
 
 `default_nettype none
 
-/* verilator lint_off WIDTHEXPAND */
-/* verilator lint_off WIDTHTRUNC */
+
+
 module feature_extractor (
     input  wire        clk,
     input  wire        rst_n,
@@ -39,9 +39,10 @@ module feature_extractor (
     input  wire [11:0] price_data,    // 12-bit price
     input  wire [11:0] volume_data,   // 12-bit volume
     input  wire        match_valid,   // order matched this cycle
+
     /* verilator lint_off UNUSEDSIGNAL */
-    input  wire [7:0]  match_price,   // matched price
-    /* verilator lint_on UNUSEDSIGNAL */
+    input  wire [7:0]  match_price, /* verilator lint_on UNUSEDSIGNAL */   // matched price
+
 
     // Output feature vector
     output reg  [127:0] features,      // 16 × 8-bit
@@ -67,7 +68,6 @@ module feature_extractor (
 
     // Running price sum for average
     reg [14:0] price_sum8;    // 8-entry, 12-bit → 15-bit
-    reg [11:0] price_avg;
     reg [11:0] price_mad;
 
     // Volume
@@ -109,7 +109,6 @@ module feature_extractor (
             ptr_l       <= 6'd0;
             vol_ptr     <= 3'd0;
             price_sum8  <= 15'd800;   // default avg = 100
-            price_avg   <= 12'd100;
             price_mad   <= 12'd5;
             vol_sum8    <= 15'd800;
             vol_avg     <= 12'd100;
@@ -140,10 +139,9 @@ module feature_extractor (
                 cur_price    <= price_data;
 
                 // Short ring buffer (8 entries)
-                price_sum8          <= price_sum8 - price_s[ptr_s] + price_data;
+                price_sum8          <= price_sum8 - {3'd0, price_s[ptr_s]} + {3'd0, price_data};
                 price_s[ptr_s]      <= price_data;
                 ptr_s               <= ptr_s + 3'd1;
-                price_avg           <= price_sum8[14:3];  // >>3 = /8
 
                 // Medium ring (32 entries) — just store
                 price_m[ptr_m] <= price_data;
@@ -164,7 +162,7 @@ module feature_extractor (
             // --- Volume update ---
             if (is_volume) begin
                 cur_vol             <= volume_data;
-                vol_sum8            <= vol_sum8 - vol_hist[vol_ptr] + volume_data;
+                vol_sum8            <= vol_sum8 - {3'd0, vol_hist[vol_ptr]} + {3'd0, volume_data};
                 vol_hist[vol_ptr]   <= volume_data;
                 vol_ptr             <= vol_ptr + 3'd1;
                 vol_avg             <= vol_sum8[14:3];
