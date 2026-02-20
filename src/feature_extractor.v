@@ -282,13 +282,13 @@ module feature_extractor (
     // Volume ratio: cur / (avg/64) = cur*64/avg, clipped to 255
     function [7:0] vol_ratio_byte;
         input [11:0] cur, avg;
-        reg [19:0] num;
+        reg [19:0] vr_tmp;
         begin
             if (avg == 12'd0)
-                vol_ratio_byte = 8'd64;  // 1x ratio default
+                vol_ratio_byte = 8'd64;
             else begin
-                num = {8'd0, cur} * 20'd64;
-                vol_ratio_byte = (num / avg > 20'd255) ? 8'd255 : num[7:0];
+                vr_tmp = ({8'd0, cur} * 20'd64) / avg;
+                vol_ratio_byte = (vr_tmp > 20'd255) ? 8'd255 : vr_tmp[7:0];
             end
         end
     endfunction
@@ -309,15 +309,14 @@ module feature_extractor (
     // Imbalance: buys/(buys+sells) * 255
     function [7:0] imbalance_byte;
         input [7:0] buys, sells;
-        reg [15:0] total;
-        reg [15:0] num;
+        reg [15:0] ib_total, ib_num;
         begin
-            total = {8'd0, buys} + {8'd0, sells};
-            if (total == 16'd0)
-                imbalance_byte = 8'd128;   // neutral
+            ib_total = {8'd0, buys} + {8'd0, sells};
+            if (ib_total == 16'd0)
+                imbalance_byte = 8'd128;
             else begin
-                num = {8'd0, buys} * 16'd255;
-                imbalance_byte = (num / total > 16'd255) ? 8'd255 : num[7:0];
+                ib_num = ({8'd0, buys} * 16'd255) / ib_total;
+                imbalance_byte = (ib_num > 16'd255) ? 8'd255 : ib_num[7:0];
             end
         end
     endfunction
@@ -325,18 +324,16 @@ module feature_extractor (
     // Momentum: encode 2nd derivative into 0..255
     // If accelerating up → > 128, down → < 128, flat → 128
     function [7:0] momentum_byte;
-        input [11:0] p0, p1, p2;   // p0 = current, p2 = oldest
-        reg signed [12:0] d1, d2, mom;
+        input [11:0] p0, p1, p2;
+        reg signed [12:0] mb_mom;
         begin
-            d1  = $signed({1'b0, p0}) - $signed({1'b0, p1});
-            d2  = $signed({1'b0, p1}) - $signed({1'b0, p2});
-            mom = d1 - d2;  // 2nd derivative
-            if (mom > 13'sd63)
+            mb_mom = ($signed({1'b0, p0}) - $signed({1'b0, p1})) - ($signed({1'b0, p1}) - $signed({1'b0, p2}));
+            if (mb_mom > 13'sd63)
                 momentum_byte = 8'd255;
-            else if (mom < -13'sd63)
+            else if (mb_mom < -13'sd63)
                 momentum_byte = 8'd0;
             else
-                momentum_byte = 8'd128 + mom[7:0];
+                momentum_byte = 8'd128 + mb_mom[7:0];
         end
     endfunction
 
