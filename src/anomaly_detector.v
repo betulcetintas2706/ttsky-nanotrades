@@ -1,196 +1,255 @@
 /*
- * NanoTrade Order Book Engine  (v3 — ML Circuit Breaker)
- * ========================================================
- * Adds ML-driven adaptive circuit breaker:
+ * NanoTrade Anomaly Detector
  *
- *  cb_mode[1:0]  Action
- *  ----------    -------
- *  2'b00         NORMAL   — full-speed matching (no restriction)
- *  2'b01         THROTTLE — accept 1 order every (cb_param>>4 + 1) cycles
- *                           Used for QUOTE_STUFFING detection.
- *  2'b10         WIDEN    — matching continues but crossing threshold raised
- *                           by spread_guard ticks so only deeply crossed books
- *                           execute. Used for ORDER_IMBALANCE.
- *  2'b11         PAUSE    — matching frozen for 2×cb_param cycles, then
- *                           auto-resumes in NORMAL.
- *                           Used for FLASH_CRASH.
+ * 8 parallel detectors running every clock cycle:
+ *   [0] Price Spike      - sudden price jump > threshold
+ *   [1] Volume Surge     - volume > 2x rolling average
+ *   [2] Trade Velocity   - too many matches per window
+ *   [3] Volatility       - price MAD exceeds threshold
+ *   [4] Volume Dry       - volume < 25% of average (liquidity crisis)
+ *   [5] Spread Widening  - bid-ask spread too wide
+ *   [6] Order Imbalance  - one-sided order pressure
+ *   [7] Flash Crash      - price drop > 20% of baseline (critical)
  *
- * cb_param[7:0]  ML confidence (0..255) scaled per mode:
- *   PAUSE    : countdown = 2 × cb_param  (max 510 cycles = 10.2 µs @ 50 MHz)
- *   THROTTLE : accept 1 order every (cb_param>>4)+1 cycles
- *   WIDEN    : spread guard ticks = cb_param>>5  (0..7)
+ * All detectors are COMBINATIONAL - they evaluate in parallel each cycle.
+ * Priority encoder selects most critical active alert.
  *
- * Circuit breaker self-heals: countdown expires → back to NORMAL with no
- * host intervention needed.  Minimum response latency = 1 cycle after
- * ML valid pulse (≈ 20 ns @ 50 MHz).
+ * Inputs:
+ *   input_type  - 00=price, 01=volume, 10=buy, 11=sell
+ *   price_data  - 12-bit price (from ui_in + uio_in)
+ *   volume_data - 12-bit volume
+ *   match_valid - order was matched this cycle (from order_book)
+ *   match_price - matched price
+ *
+ * Outputs:
+ *   alert_any      - any alert active
+ *   alert_priority - 3-bit priority (7=critical flash crash)
+ *   alert_type     - which alert is highest priority
+ *   alert_bitmap   - all 8 alert flags
  */
 
 `default_nettype none
 
 
 
-module order_book (
-    input  wire       clk,
-    input  wire       rst_n,
-    input  wire [1:0] input_type,
+module anomaly_detector (
+    input  wire        clk,
+    input  wire        rst_n,
+    input  wire [1:0]  input_type,
+    input  wire [11:0] price_data,
+    input  wire [11:0] volume_data,
+    input  wire        match_valid,
 
     /* verilator lint_off UNUSEDSIGNAL */
-    input  wire [5:0] data_in,
-
-    input  wire [5:0] ext_data, /* verilator lint_on UNUSEDSIGNAL */
-    // ── ML Circuit Breaker Interface ────────────────────────────────
-    input  wire [1:0] cb_mode,       // 00=normal 01=throttle 10=widen 11=pause
-    input  wire [7:0] cb_param,      // confidence-derived parameter
-    input  wire       cb_load,       // 1-cycle pulse to latch new CB config
-    // ── Outputs ─────────────────────────────────────────────────────
-    output reg        match_valid,
-    output reg  [7:0] match_price,
-    output wire       cb_active,     // 1 = CB currently engaged
-    output wire [1:0] cb_state       // current CB mode
+    input  wire [7:0]  match_price, /* verilator lint_on UNUSEDSIGNAL */
+    // Live threshold inputs from config register (set via UI at demo time)
+    input  wire [11:0] spike_thresh,   // default 12'd20
+    input  wire [11:0] flash_thresh,   // default 12'd40
+    output wire        alert_any,
+    output wire [2:0]  alert_priority,
+    output wire [2:0]  alert_type,
+    output wire [7:0]  alert_bitmap
 );
 
-    // ----------------------------------------------------------------
-    // Order book: 4 bids, 4 asks  [{valid, price[6:0]}]
-    // ----------------------------------------------------------------
-    reg [7:0] bid [0:3];
-    reg [7:0] ask [0:3];
+    // ---------------------------------------------------------------
+    // Registered history for rolling calculations
+    // ---------------------------------------------------------------
 
-    wire [6:0] new_price = {1'b0, ext_data[0], data_in[5:1]};
-    wire       is_buy    = (input_type == 2'b10);
-    wire       is_sell   = (input_type == 2'b11);
+    // Price history: 8-entry ring buffer of 12-bit prices
+    reg [11:0] price_hist [0:7];
+    reg [2:0]  price_ptr;
 
-    // ----------------------------------------------------------------
-    // Best bid / ask (comb)
-    // ----------------------------------------------------------------
-    reg [6:0] best_bid; reg best_bid_valid; reg [1:0] best_bid_idx;
-    reg [6:0] best_ask; reg best_ask_valid; reg [1:0] best_ask_idx;
+    // Volume history: 8-entry ring buffer
+    reg [11:0] vol_hist [0:7];
+    reg [2:0]  vol_ptr;
+
+    // Baseline price (average of last 8, updated slowly)
+    reg [14:0] price_sum;   // 12-bit * 8 needs 15 bits
+    reg [11:0] price_avg;
+
+    // Baseline volume
+    reg [14:0] vol_sum;
+    reg [11:0] vol_avg;
+
+    // Trade velocity counter
+    reg [5:0]  match_counter;  // matches in current window
+    reg [7:0]  window_timer;   // window period counter
+    reg [5:0]  match_rate;     // captured at window end
+
+    // Bid/ask depth counters (from order book pressure)
+    reg [3:0]  buy_order_count;
+    reg [3:0]  sell_order_count;
+
+    // Current values
+    reg [11:0] current_price;
+    reg [11:0] prev_price;
+    reg [11:0] current_volume;
+
+    // Mean Absolute Deviation for volatility
+    reg [11:0] price_mad;
+
+    wire is_price  = (input_type == 2'b00);
+    wire is_volume = (input_type == 2'b01);
+    wire is_buy    = (input_type == 2'b10);
+    wire is_sell   = (input_type == 2'b11);
+
     integer i;
 
-    always @(*) begin
-        best_bid=7'h00; best_bid_valid=1'b0; best_bid_idx=2'd0;
-        best_ask=7'h7F; best_ask_valid=1'b0; best_ask_idx=2'd0;
-        for(i=0;i<4;i=i+1) begin
-            if(bid[i][7]&&(!best_bid_valid||bid[i][6:0]>best_bid)) begin
-                best_bid=bid[i][6:0]; best_bid_valid=1'b1; best_bid_idx=i[1:0]; end
-        end
-        for(i=0;i<4;i=i+1) begin
-            if(ask[i][7]&&(!best_ask_valid||ask[i][6:0]<best_ask)) begin
-                best_ask=ask[i][6:0]; best_ask_valid=1'b1; best_ask_idx=i[1:0]; end
-        end
-    end
-
-    // ----------------------------------------------------------------
-    // Empty slot finder (comb)
-    // ----------------------------------------------------------------
-    reg [1:0] empty_bid_slot; reg has_empty_bid;
-    reg [1:0] empty_ask_slot; reg has_empty_ask;
-
-    always @(*) begin
-        empty_bid_slot=2'd0; has_empty_bid=1'b0;
-        empty_ask_slot=2'd0; has_empty_ask=1'b0;
-        for(i=3;i>=0;i=i-1) begin
-            if(!bid[i][7]) begin empty_bid_slot=i[1:0]; has_empty_bid=1'b1; end
-            if(!ask[i][7]) begin empty_ask_slot=i[1:0]; has_empty_ask=1'b1; end
-        end
-    end
-
-    // ================================================================
-    // CIRCUIT BREAKER STATE MACHINE
-    // ================================================================
-
-    reg [1:0]  cb_mode_r;
-    reg [8:0]  cb_countdown;      // 9-bit: up to 510 cycles
- reg [7:0]  cb_param_r;
-    wire _cb_param_r_unused = |cb_param_r[3:0];  // prevent UNUSEDSIGNAL
-    reg [3:0]  throttle_cnt;
-
-    wire [3:0] throttle_div   = cb_param_r[7:4];
-    wire       throttle_allow = (throttle_cnt == 4'd0);
-    wire [2:0] spread_guard   = cb_param_r[7:5];
-
-    assign cb_active = (cb_mode_r != 2'b00);
-    assign cb_state  = cb_mode_r;
-
+    // ---------------------------------------------------------------
+    // Sequential: update history registers
+    // ---------------------------------------------------------------
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            cb_mode_r    <= 2'b00;
-            cb_countdown <= 9'd0;
-            cb_param_r   <= 8'd0;
-            throttle_cnt <= 4'd0;
+            price_ptr        <= 3'd0;
+            vol_ptr          <= 3'd0;
+            price_sum        <= 15'd0;
+            vol_sum          <= 15'd0;
+            price_avg        <= 12'd100;  // sane default
+            vol_avg          <= 12'd100;
+            match_counter    <= 6'd0;
+            window_timer     <= 8'd0;
+            match_rate       <= 6'd0;
+            buy_order_count  <= 4'd0;
+            sell_order_count <= 4'd0;
+            current_price    <= 12'd100;
+            prev_price       <= 12'd100;
+            current_volume   <= 12'd0;
+            price_mad        <= 12'd5;
+            for (i = 0; i < 8; i = i + 1) begin
+                price_hist[i] <= 12'd100;
+                vol_hist[i]   <= 12'd100;
+            end
         end else begin
-            if (cb_load) begin
-                // Latch new CB config from ML engine
-                cb_mode_r  <= cb_mode;
-                cb_param_r <= cb_param;
-                case (cb_mode)
-                    2'b00: cb_countdown <= 9'd0;
-                    2'b01: cb_countdown <= {1'b0, cb_param};
-                    2'b10: cb_countdown <= {1'b0, cb_param};
-                    2'b11: cb_countdown <= {cb_param[7:0], 1'b0}; // 2× for PAUSE
-                endcase
-                throttle_cnt <= 4'd0;
-            end else begin
-                // Countdown expiry → self-heal to NORMAL
-                if (cb_mode_r != 2'b00) begin
-                    if (cb_countdown == 9'd0)
-                        cb_mode_r <= 2'b00;
-                    else
-                        cb_countdown <= cb_countdown - 9'd1;
-                end
 
-                // Throttle divider counter
-                if (cb_mode_r == 2'b01) begin
-                    if (throttle_cnt == throttle_div)
-                        throttle_cnt <= 4'd0;
-                    else
-                        throttle_cnt <= throttle_cnt + 4'd1;
-                end else
-                    throttle_cnt <= 4'd0;
+            // Update price history
+            if (is_price) begin
+                prev_price               <= current_price;
+                current_price            <= price_data;
+                price_sum                <= price_sum - {3'd0, price_hist[price_ptr]} + {3'd0, price_data};
+                price_hist[price_ptr]    <= price_data;
+                price_ptr                <= price_ptr + 3'd1;
+                price_avg                <= price_sum[14:3]; // divide by 8
+
+                // Update MAD (simplified: |price - avg| rolling average)
+                if (price_data > price_avg)
+                    price_mad <= (price_mad * 7 + (price_data - price_avg)) >> 3;
+                else
+                    price_mad <= (price_mad * 7 + (price_avg - price_data)) >> 3;
+            end
+
+            // Update volume history
+            if (is_volume) begin
+                current_volume        <= volume_data;
+                vol_sum               <= vol_sum - {3'd0, vol_hist[vol_ptr]} + {3'd0, volume_data};
+                vol_hist[vol_ptr]     <= volume_data;
+                vol_ptr               <= vol_ptr + 3'd1;
+                vol_avg               <= vol_sum[14:3]; // divide by 8
+            end
+
+            // Update order pressure counters
+            if (is_buy)
+                buy_order_count  <= (buy_order_count < 4'hF) ? buy_order_count + 4'd1 : 4'hF;
+            if (is_sell)
+                sell_order_count <= (sell_order_count < 4'hF) ? sell_order_count + 4'd1 : 4'hF;
+
+            // Trade velocity window
+            if (match_valid)
+                match_counter <= (match_counter < 6'h3F) ? match_counter + 6'd1 : 6'h3F;
+
+            window_timer <= window_timer + 8'd1;
+            if (window_timer == 8'hFF) begin
+                match_rate    <= match_counter;
+                match_counter <= 6'd0;
+                // Slowly decay order counts to avoid stale data
+                buy_order_count  <= buy_order_count >> 1;
+                sell_order_count <= sell_order_count >> 1;
             end
         end
     end
 
-    // ================================================================
-    // ORDER INSERTION + MATCHING  (CB-enforced)
-    // ================================================================
+    // ---------------------------------------------------------------
+    // COMBINATIONAL PARALLEL DETECTORS (all evaluate same cycle)
+    // ---------------------------------------------------------------
 
-    wire order_gate = (cb_mode_r == 2'b11) ? 1'b0 :          // PAUSE: block
-                      (cb_mode_r == 2'b01) ? throttle_allow : // THROTTLE: gate
-                      1'b1;                                     // NORMAL/WIDEN: free
+    // Thresholds — driven by config register via top-level (tunable live at demo)
+    // spike_thresh and flash_thresh are inputs; others remain fixed
+    localparam VOL_SURGE_MULT  = 2;
+    localparam VELOCITY_THRESH = 6'd30;
+    localparam VOL_DRY_DIV     = 4;
 
-    wire match_gate = (cb_mode_r == 2'b11) ? 1'b0 :  // PAUSE: no matches
-                      1'b1;
+    // [0] Price Spike
+    wire [11:0] price_delta = (current_price > prev_price) ?
+                               current_price - prev_price :
+                               prev_price - current_price;
+    wire det_spike = (price_delta > spike_thresh);
 
-    // Spread guard: widen effective crossing threshold in WIDEN mode
-    // Spread guard only active in WIDEN mode (cb_mode_r == 2'b10)
-    wire [2:0] active_guard    = (cb_mode_r == 2'b10) ? spread_guard : 3'd0;
-    wire [6:0] cross_threshold = best_ask + {4'd0, active_guard};
-    wire       crossing = best_bid_valid && best_ask_valid &&
-                          (best_bid >= cross_threshold);
+    // [1] Volume Surge
+    wire [12:0] vol_surge_thresh = {1'b0, vol_avg} << VOL_SURGE_MULT;
+    wire det_vol_surge = (vol_avg > 12'd0) &&
+                         ({1'b0, current_volume} > vol_surge_thresh);
 
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            match_valid <= 1'b0;
-            match_price <= 8'd0;
-            for(i=0;i<4;i=i+1) begin bid[i]<=8'h00; ask[i]<=8'h00; end
-        end else begin
-            match_valid <= 1'b0;
+    // [2] Trade Velocity
+    wire det_velocity = (match_rate > VELOCITY_THRESH);
 
-            // Insert (CB gated)
-            if (order_gate) begin
-                if (is_buy  && has_empty_bid) bid[empty_bid_slot] <= {1'b1, new_price};
-                if (is_sell && has_empty_ask) ask[empty_ask_slot] <= {1'b1, new_price};
-            end
+    // [3] Volatility (MAD-based)
+    wire [11:0] vol_deviation = (price_delta > price_mad) ?
+                                 price_delta - price_mad : 12'd0;
+    wire det_volatility = (price_mad > 12'd0) &&
+                          (vol_deviation > (price_mad << 2));
 
-            // Match (CB gated + spread guard)
-            if (match_gate && crossing) begin
-                match_valid             <= 1'b1;
-                match_price             <= {1'b0, best_ask};
-                bid[best_bid_idx]       <= 8'h00;
-                ask[best_ask_idx]       <= 8'h00;
-            end
-        end
-    end
+    // [4] Volume Drying
+    wire [11:0] vol_dry_thresh = (vol_avg >> VOL_DRY_DIV);
+    wire det_vol_dry = (vol_avg > 12'd10) &&  // only when baseline established
+                       (current_volume < vol_dry_thresh);
+
+    // [5] Spread Widening (using bid/ask order counts as proxy)
+    //     Wide spread = few orders on one side
+    wire det_spread = (buy_order_count == 4'd0 && sell_order_count > 4'd2) ||
+                      (sell_order_count == 4'd0 && buy_order_count > 4'd2);
+
+    // [6] Order Imbalance (3:1 ratio)
+    wire det_imbalance = (buy_order_count > 4'd0 && sell_order_count > 4'd0) &&
+                         ((buy_order_count > (sell_order_count << 2)) ||
+                          (sell_order_count > (buy_order_count << 2)));
+
+    // [7] Flash Crash - CRITICAL: price dropped >40 from established average
+    wire [11:0] price_drop = (price_avg > current_price) ?
+                              price_avg - current_price : 12'd0;
+    wire det_flash = (price_avg > 12'd20) && (price_drop > flash_thresh);
+
+    // Bundle all detector outputs
+    assign alert_bitmap = {det_flash,
+                           det_volatility,
+                           det_spread,
+                           det_imbalance,
+                           det_velocity,
+                           det_vol_surge,
+                           det_vol_dry,
+                           det_spike};
+
+    // ---------------------------------------------------------------
+    // Priority encoder (highest priority = most dangerous)
+    // ---------------------------------------------------------------
+    assign alert_any = |alert_bitmap;
+
+    // Priority: Flash(7) > Volatility(6) > Spread(5) > Imbalance(4)
+    //         > Velocity(3) > VolSurge(2) > VolDry(1) > Spike(0)
+    assign alert_priority = det_flash      ? 3'd7 :
+                            det_volatility ? 3'd6 :
+                            det_spread     ? 3'd5 :
+                            det_imbalance  ? 3'd4 :
+                            det_velocity   ? 3'd3 :
+                            det_vol_surge  ? 3'd2 :
+                            det_vol_dry    ? 3'd1 :
+                            det_spike      ? 3'd0 : 3'd0;
+
+    assign alert_type = det_flash      ? 3'd7 :
+                        det_volatility ? 3'd6 :
+                        det_spread     ? 3'd5 :
+                        det_imbalance  ? 3'd4 :
+                        det_velocity   ? 3'd3 :
+                        det_vol_surge  ? 3'd2 :
+                        det_vol_dry    ? 3'd1 :
+                        det_spike      ? 3'd0 : 3'd0;
 
 endmodule
-// end
