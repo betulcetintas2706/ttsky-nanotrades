@@ -246,7 +246,7 @@ module ml_inference_engine (
     // ---------------------------------------------------------------
     reg signed [31:0] acc1_comb [0:3];
     reg [7:0]         s1_next   [0:3];
-    integer i1, h1;
+    integer i1, h1, h1s;
 
     // Combinational: compute accumulation and ReLU for stage 1
     always @(*) begin : s1_mac_comb
@@ -274,8 +274,8 @@ module ml_inference_engine (
         end else begin
             s1_valid <= s0_valid;
             if (s0_valid) begin
-                for (h1 = 0; h1 < 4; h1 = h1 + 1)
-                    s1_hidden[h1] <= s1_next[h1];
+                for (h1s = 0; h1s < 4; h1s = h1s + 1)
+                    s1_hidden[h1s] <= s1_next[h1s];
             end
         end
     end
@@ -284,7 +284,7 @@ module ml_inference_engine (
     // Stage 2: Layer-2 MAC  (4 hidden × 6 output neurons)
     //   logit[o] = Σ_{h=0}^{3} hidden[h] * W2[h*6+o]  +  b2[o]
     // ---------------------------------------------------------------
-    integer h2, o2;
+    integer h2, o2, o2s;
     // Combinational: compute layer-2 accumulation
     reg signed [31:0] acc2_comb [0:5];
 
@@ -307,8 +307,8 @@ module ml_inference_engine (
         end else begin
             s2_valid <= s1_valid;
             if (s1_valid) begin
-                for (o2 = 0; o2 < 6; o2 = o2 + 1)
-                    s2_logit[o2] <= acc2_comb[o2];
+                for (o2s = 0; o2s < 6; o2s = o2s + 1)
+                    s2_logit[o2s] <= acc2_comb[o2s];
             end
         end
     end
