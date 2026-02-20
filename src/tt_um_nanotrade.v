@@ -33,8 +33,8 @@
 
 `default_nettype none
 
-/* verilator lint_off WIDTHEXPAND */
-/* verilator lint_off WIDTHTRUNC */
+
+
 module tt_um_nanotrade #(
     parameter CLK_HZ = 50_000_000
 ) (
@@ -81,7 +81,7 @@ module tt_um_nanotrade #(
     // ---------------------------------------------------------------
     wire [2:0]  ml_class;
     wire [7:0]  ml_confidence;
-    /* verilator lint_off UNUSEDSIGNAL */ wire [7:0]  ml_margin; /* verilator lint_on UNUSEDSIGNAL */
+ wire [7:0]  ml_margin;
     wire        ml_valid;
 
     // ---------------------------------------------------------------
@@ -115,7 +115,8 @@ module tt_um_nanotrade #(
     // Cascade Detector outputs (may override CB command)
     // ---------------------------------------------------------------
     wire        cascade_alert;
-    /* verilator lint_off UNUSEDSIGNAL */ wire [1:0]  cascade_type; /* verilator lint_on UNUSEDSIGNAL */
+ wire [1:0]  cascade_type;
+    wire _cascade_type_unused = cascade_type[1];  // bit[1] reserved
     wire        cascade_cb_load;
     wire [7:0]  cascade_cb_param;
 
@@ -211,7 +212,6 @@ module tt_um_nanotrade #(
         .feature_valid (feature_valid),
         .ml_class      (ml_class),
         .ml_confidence (ml_confidence),
-        .ml_margin     (ml_margin),
         .ml_valid      (ml_valid)
     );
 
@@ -240,19 +240,17 @@ module tt_um_nanotrade #(
     // Alert Fusion
     // ---------------------------------------------------------------
     reg [2:0] ml_class_held;
-    /* verilator lint_off UNUSEDSIGNAL */ reg [7:0] ml_conf_held; /* verilator lint_on UNUSEDSIGNAL */
+ reg [7:0] ml_conf_held;
     reg       ml_anomaly_held;
     reg [2:0] ml_prio_held;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             ml_class_held   <= 3'd0;
-            ml_conf_held    <= 8'd0;
             ml_anomaly_held <= 1'b0;
             ml_prio_held    <= 3'd0;
         end else if (ml_valid) begin
             ml_class_held   <= ml_class;
-            ml_conf_held    <= ml_confidence;
             ml_anomaly_held <= (ml_class != 3'd0);
             case (ml_class)
                 3'd0: ml_prio_held <= 3'd0;
@@ -308,7 +306,7 @@ module tt_um_nanotrade #(
                 uart_bit_cnt <= 10'd0; uart_bits <= 4'd0;
                 uart_busy    <= 1'b1;  uart_tx   <= 1'b0;
             end else if (uart_busy) begin
-                if (uart_bit_cnt >= BAUD_DIV - 1) begin
+                if ({22'd0, uart_bit_cnt} >= BAUD_DIV - 1) begin
                     uart_bit_cnt <= 10'd0;
                     uart_bits    <= uart_bits + 4'd1;
                     uart_tx      <= uart_shift[uart_bits];
@@ -330,7 +328,7 @@ module tt_um_nanotrade #(
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin hb_cnt <= 25'd0; hb_led <= 1'b0; end
         else begin
-            if (hb_cnt >= HB_DIV - 1) begin hb_cnt <= 25'd0; hb_led <= ~hb_led; end
+            if ({7'd0, hb_cnt} >= HB_DIV - 1) begin hb_cnt <= 25'd0; hb_led <= ~hb_led; end
             else hb_cnt <= hb_cnt + 25'd1;
         end
     end
