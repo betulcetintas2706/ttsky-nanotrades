@@ -100,9 +100,8 @@ module order_book (
 
     reg [1:0]  cb_mode_r;
     reg [8:0]  cb_countdown;      // 9-bit: up to 510 cycles
- reg [7:0]  cb_param_r;
-    wire _cb_param_r_unused = |cb_param_r[3:0];  // prevent UNUSEDSIGNAL
-    reg [3:0]  throttle_cnt;
+/* verilator lint_off UNUSEDSIGNAL */ reg [7:0]  cb_param_r; /* verilator lint_on UNUSEDSIGNAL */
+       reg [3:0]  throttle_cnt;
 
     wire [3:0] throttle_div   = cb_param_r[7:4];
     wire       throttle_allow = (throttle_cnt == 4'd0);
