@@ -1,39 +1,16 @@
 /*
  * NanoTrade — Top-Level TinyTapeout Wrapper  (v4 — Cascade Detection)
- * =====================================================================
- * NEW in v4: Market Cascade Detector
- * ------------------------------------
- * A 3-entry event shift register watches BOTH the rule-based alert stream
- * AND the ML class stream simultaneously.  When it recognises a cascade
- * signature — multiple distinct anomaly types arriving within a time window —
- * it fires a priority-8 CASCADE alert and DOUBLES the CB freeze duration.
+ * + Telemetry Burst Upgrade (no new pins)
  *
- * Cascade signatures detected:
- *   VOL_CRASH   : VOLUME_SURGE  → FLASH_CRASH  (panic selling)
- *   SPIKE_CRASH : PRICE_SPIKE   → FLASH_CRASH  (failed squeeze)
- *   STUFF_CRASH : QUOTE_STUFFING→ FLASH_CRASH  (spoofing attack)
- *   TRIPLE      : any 3 distinct anomalies → FLASH_CRASH (systemic)
- *
- * The 2010 Flash Crash was a TRIPLE cascade starting at 14:32 ET.
- * This chip would have detected it within 4 clock cycles = 80 ns.
- *
- * Pin mapping: UNCHANGED from v3 (TT-compatible)
- *
- *   uo_out[7]    Global alert (rule OR ML OR CASCADE)
- *   uo_out[6:4]  Alert priority (7=critical, 8 shown as 7 on 3-bit output)
- *   uo_out[3]    Match valid / CB active / UART TX / heartbeat
- *   uo_out[2:0]  Alert type (7=flash crash; cascade shown as type 7 + cascade flag)
- *
- *   uio_out[7]   ML valid pulse
- *   uio_out[6:4] ML class
- *   uio_out[3:2] CB state
- *   uio_out[1]   CASCADE alert flag  (NEW)
- *   uio_out[0]   CASCADE type LSB   (NEW — type[0], use with type[1] on next read)
+ * Telemetry Burst (NEW):
+ * - On rising edge of comb_alert, for BURST_LEN cycles:
+ *     uo_out[6:4] = 3'b111  (debug marker)
+ *     uo_out[2:0] = reason_code[2:0]
+ *     uio_out[7:0] = health_score[7:0]
+ * - uo_out[7] (global alert) remains truthful always.
  */
 
 `default_nettype none
-
-
 
 module tt_um_nanotrade #(
     parameter CLK_HZ = 50_000_000
@@ -114,16 +91,14 @@ module tt_um_nanotrade #(
     // Cascade Detector outputs (may override CB command)
     // ---------------------------------------------------------------
     wire        cascade_alert;
- /* verilator lint_off UNUSEDSIGNAL */ wire [1:0]  cascade_type; /* verilator lint_on UNUSEDSIGNAL */
+    /* verilator lint_off UNUSEDSIGNAL */ wire [1:0]  cascade_type; /* verilator lint_on UNUSEDSIGNAL */
     wire _cascade_type_unused = cascade_type[1];  // bit[1] reserved
     wire        cascade_cb_load;
     wire [7:0]  cascade_cb_param;
 
     // Mux: cascade overrides normal ML→CB when cascade fires
-    // Cascade always forces PAUSE (2'b11) with doubled param
-    // Cascade overrides ML CB load: when cascade fires, suppress normal ML->CB
     wire        cb_load_final  = cascade_cb_load | (cb_load_r & !cascade_alert);
-    wire [1:0]  cb_mode_final  = cascade_cb_load ? 2'b11       : cb_mode_cmd;
+    wire [1:0]  cb_mode_final  = cascade_cb_load ? 2'b11            : cb_mode_cmd;
     wire [7:0]  cb_param_final = cascade_cb_load ? cascade_cb_param : cb_param_cmd;
 
     always @(posedge clk or negedge rst_n) begin
@@ -229,6 +204,7 @@ module tt_um_nanotrade #(
         .ml_valid        (ml_valid),
         .ml_class        (ml_class),
         .ml_confidence   (ml_confidence),
+        .ml_valid        (ml_valid),
         .cascade_alert   (cascade_alert),
         .cascade_type    (cascade_type),
         .cascade_cb_load (cascade_cb_load),
@@ -267,21 +243,83 @@ module tt_um_nanotrade #(
     wire [2:0]  comb_priority = cascade_alert  ? 3'd7 :
                                 (rule_alert_priority > ml_prio_held) ?
                                   rule_alert_priority : ml_prio_held;
-    wire [2:0]  comb_type     = cascade_alert  ? 3'd7 :   // shown as FLASH_CRASH
+    wire [2:0]  comb_type     = cascade_alert  ? 3'd7 :
                                 (rule_alert_priority >= ml_prio_held) ?
                                   rule_alert_type : ml_class_held;
 
     // ---------------------------------------------------------------
+    // Telemetry Burst (NEW): explainability + health without new pins
+    // ---------------------------------------------------------------
+    localparam integer BURST_LEN = 8;
+
+    reg        prev_comb_alert;
+    reg [3:0]  burst_cnt;
+
+    wire alert_rise = comb_alert && !prev_comb_alert;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            prev_comb_alert <= 1'b0;
+            burst_cnt       <= 4'd0;
+        end else begin
+            prev_comb_alert <= comb_alert;
+
+            if (alert_rise)
+                burst_cnt <= BURST_LEN[3:0];
+            else if (burst_cnt != 0)
+                burst_cnt <= burst_cnt - 4'd1;
+        end
+    end
+
+    wire burst_active = (burst_cnt != 0);
+
+    // Reason code (3 bits)
+    // 0 NONE
+    // 1 RULE_*  (rule_alert_type folded)
+    // 3 ML_RISK
+    // 4 CASCADE
+    // 5 CIRCUIT_BREAKER_ACTIVE
+    reg [2:0] reason_code;
+    always @(*) begin
+        if (cascade_alert)        reason_code = 3'd4;
+        else if (cb_active)       reason_code = 3'd5;
+        else if (rule_alert_any)  reason_code = 3'd1; // simple; keep stable
+        else if (ml_anomaly_held) reason_code = 3'd3;
+        else                      reason_code = 3'd0;
+    end
+
+    // Health score (8 bits): 255 = healthy, lower = worse
+    // Pure 8-bit subtracts + clamp (synthesis-friendly)
+    reg [7:0] health_score;
+    always @(*) begin
+        reg [7:0] s;
+        s = 8'hFF;
+
+        if (rule_alert_any) begin
+            s = (s > 8'd40) ? (s - 8'd40) : 8'd0;
+        end
+        if (ml_anomaly_held) begin
+            s = (s > 8'd30) ? (s - 8'd30) : 8'd0;
+        end
+        if (cb_active) begin
+            s = (s > 8'd60) ? (s - 8'd60) : 8'd0;
+        end
+        if (cascade_alert) begin
+            s = (s > 8'd90) ? (s - 8'd90) : 8'd0;
+        end
+
+        health_score = s;
+    end
+
+    // ---------------------------------------------------------------
     // UART READBACK — 115200 baud, 8N1
-    // Payload updated: bit 7 of type field repurposed as cascade flag
     // ---------------------------------------------------------------
     localparam BAUD_DIV = CLK_HZ / 115200;
 
     wire [7:0] uart_payload = {comb_type, comb_priority, ml_class_held[1:0]};
 
     reg        prev_alert_r;
-    wire       uart_trigger = (comb_alert && !prev_alert_r) || ml_valid
-                              || cascade_alert;
+    wire       uart_trigger = (comb_alert && !prev_alert_r) || ml_valid || cascade_alert;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) prev_alert_r <= 1'b0;
@@ -332,9 +370,10 @@ module tt_um_nanotrade #(
     end
 
     // ---------------------------------------------------------------
-    // Output mux
+    // Output mux (normal + telemetry burst override)
     // ---------------------------------------------------------------
     always @(*) begin
+        // NORMAL outputs (unchanged mapping)
         uo_out[7]   = comb_alert;
         uo_out[6:4] = comb_priority;
         uo_out[2:0] = comb_type;
@@ -347,19 +386,28 @@ module tt_um_nanotrade #(
             uo_out[3] = uart_tx;
         else
             uo_out[3] = hb_led;
+
+        // TELEMETRY BURST override (no new pins)
+        if (burst_active) begin
+            uo_out[7]   = comb_alert;   // keep truthful
+            uo_out[6:4] = 3'b111;       // debug marker
+            uo_out[2:0] = reason_code;  // explainability
+            // uo_out[3] left as-is (match/cb/uart/hb behavior unchanged)
+        end
     end
 
     // ---------------------------------------------------------------
     // Bidirectional outputs
-    // uio_out[7]   ML valid
-    // uio_out[6:4] ML class
-    // uio_out[3:2] CB state
-    // uio_out[1]   CASCADE alert flag  ← NEW
-    // uio_out[0]   CASCADE type[0]     ← NEW
+    // Normal:
+    //   match_valid ? match_price : {ml_valid, ml_class_held, cb_state, cascade_alert, cascade_type[0]}
+    // Burst:
+    //   uio_out = health_score
     // ---------------------------------------------------------------
-    assign uio_out = match_valid ? match_price :
-                     {ml_valid, ml_class_held, cb_state,
-                      cascade_alert, cascade_type[0]};
+    wire [7:0] uio_out_normal =
+        match_valid ? match_price :
+        {ml_valid, ml_class_held, cb_state, cascade_alert, cascade_type[0]};
+
+    assign uio_out = burst_active ? health_score : uio_out_normal;
     assign uio_oe  = 8'hFF;
 
     wire _unused = &{ena, uio_in[6:2], rule_alert_bitmap, 1'b0};
