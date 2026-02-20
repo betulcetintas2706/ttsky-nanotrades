@@ -64,16 +64,17 @@ module order_book (
     // ----------------------------------------------------------------
     reg [6:0] best_bid; reg best_bid_valid; reg [1:0] best_bid_idx;
     reg [6:0] best_ask; reg best_ask_valid; reg [1:0] best_ask_idx;
-    integer i, i2, i3;
+    integer i3;
 
-    always @(*) begin
+    always @(*) begin : best_finder
+        reg [2:0] i;
         best_bid=7'h00; best_bid_valid=1'b0; best_bid_idx=2'd0;
         best_ask=7'h7F; best_ask_valid=1'b0; best_ask_idx=2'd0;
-        for(i=0;i<4;i=i+1) begin
+        for(i=3'd0;i<3'd4;i=i+3'd1) begin
             if(bid[i][7]&&(!best_bid_valid||bid[i][6:0]>best_bid)) begin
                 best_bid=bid[i][6:0]; best_bid_valid=1'b1; best_bid_idx=i[1:0]; end
         end
-        for(i=0;i<4;i=i+1) begin
+        for(i=3'd0;i<3'd4;i=i+3'd1) begin
             if(ask[i][7]&&(!best_ask_valid||ask[i][6:0]<best_ask)) begin
                 best_ask=ask[i][6:0]; best_ask_valid=1'b1; best_ask_idx=i[1:0]; end
         end
@@ -85,13 +86,18 @@ module order_book (
     reg [1:0] empty_bid_slot; reg has_empty_bid;
     reg [1:0] empty_ask_slot; reg has_empty_ask;
 
-    always @(*) begin
+    always @(*) begin : slot_finder
+        // Unrolled (was: for i2=3 downto 0) — avoids integer-in-comb-block Yosys issue
         empty_bid_slot=2'd0; has_empty_bid=1'b0;
         empty_ask_slot=2'd0; has_empty_ask=1'b0;
-        for(i2=3;i2>=0;i2=i2-1) begin
-            if(!bid[i2][7]) begin empty_bid_slot=i2[1:0]; has_empty_bid=1'b1; end
-            if(!ask[i2][7]) begin empty_ask_slot=i2[1:0]; has_empty_ask=1'b1; end
-        end
+        if(!bid[3][7]) begin empty_bid_slot=2'd3; has_empty_bid=1'b1; end
+        if(!ask[3][7]) begin empty_ask_slot=2'd3; has_empty_ask=1'b1; end
+        if(!bid[2][7]) begin empty_bid_slot=2'd2; has_empty_bid=1'b1; end
+        if(!ask[2][7]) begin empty_ask_slot=2'd2; has_empty_ask=1'b1; end
+        if(!bid[1][7]) begin empty_bid_slot=2'd1; has_empty_bid=1'b1; end
+        if(!ask[1][7]) begin empty_ask_slot=2'd1; has_empty_ask=1'b1; end
+        if(!bid[0][7]) begin empty_bid_slot=2'd0; has_empty_bid=1'b1; end
+        if(!ask[0][7]) begin empty_ask_slot=2'd0; has_empty_ask=1'b1; end
     end
 
     // ================================================================
